@@ -506,6 +506,20 @@ body.sidebar-collapsed #sidebar {
 .cl-wind{display:flex;align-items:center;gap:3px;font:700 12px 'JetBrains Mono',monospace;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000}
 .cl-wind span{display:inline-block;color:#3fa7ff;font-size:16px;transform-origin:50% 50%}
 .cl-lims{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+/* ---- painéis minimizados (só animação) ---- */
+.ci-mini{display:none;flex-direction:column;gap:5px;padding:8px 12px 10px}
+.ci-minb{font-size:1.15rem!important;line-height:1;transition:transform .15s}
+.mini .ci-minb{transform:rotate(180deg)}
+#ciPanel.mini,#clPanel.mini{top:auto!important;bottom:14px;max-height:none}
+.mini .ci-body{display:none!important}
+.mini .ci-mini{display:flex}
+.mini .ci-head{padding:6px 12px}
+.mini-lbl{font-size:.76rem;line-height:1.35;text-align:center}
+.mini-lbl b{font-family:'JetBrains Mono',monospace}
+.mini .mini-play{font-size:.95rem}
+@media (max-width:760px){
+  #ciPanel.mini,#clPanel.mini{bottom:8px;left:8px;right:62px}
+}
 /* ---- Gravação de trajeto (GPS) ---- */
 #trkBar{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);z-index:1160;display:none;
   flex-direction:column;gap:7px;background:var(--panel);border:1px solid #ff5a36;border-radius:12px;
@@ -761,7 +775,11 @@ body.sidebar-collapsed #sidebar {
   </div>
 
   <div id="clPanel">
-    <div class="ci-head"><h3>🌦 Clima</h3><button id="clRefresh" title="Atualizar">↻</button><button id="clClose" title="Fechar">✕</button></div>
+    <div class="ci-head"><h3>🌦 Clima</h3><button id="clRefresh" title="Atualizar">↻</button><button class="ci-minb" data-p="cl" title="Minimizar / expandir">⌄</button><button id="clClose" title="Fechar">✕</button></div>
+    <div class="ci-mini" id="clMini">
+      <div class="ci-row"><button class="ci-b mini-play" style="flex:0 0 44px">▶</button><input type="range" class="mini-sl" min="0" max="0" value="0" style="padding:0"></div>
+      <div class="mini-lbl"></div>
+    </div>
     <div class="ci-body">
       <div class="ci-sec">
         <div class="ci-tit">Local</div>
@@ -833,7 +851,11 @@ body.sidebar-collapsed #sidebar {
   </div>
 
   <div id="ciPanel">
-    <div class="ci-head"><h3>📡 Cintilação ionosférica</h3><button id="ciClose" title="Fechar">✕</button></div>
+    <div class="ci-head"><h3>📡 Cintilação ionosférica</h3><button class="ci-minb" data-p="ci" title="Minimizar / expandir">⌄</button><button id="ciClose" title="Fechar">✕</button></div>
+    <div class="ci-mini" id="ciMini">
+      <div class="ci-row"><button class="ci-b mini-play" style="flex:0 0 44px">▶</button><input type="range" class="mini-sl" min="0" max="0" value="0" style="padding:0"></div>
+      <div class="mini-lbl"></div>
+    </div>
     <div class="ci-body">
       <div class="ci-sec">
         <div class="ci-tit">Local</div>
@@ -4455,6 +4477,52 @@ el('clCsv').addEventListener('click',()=>{
 });
 window._cl={CL,deltaT,correlaciona,calculaETA,avalia};
 })();
+
+/* =========================================================================
+   MINIMIZAR PAINÉIS (Cintilação / Clima): barra só com play + linha do tempo
+   ========================================================================= */
+(function(){
+  const el=id=>document.getElementById(id);
+  const CFG={
+    ci:{pn:'ciPanel', play:'ciPlay', sl:'ciSlider', lbl:()=>{
+      if(el('ciResult').style.display==='none') return '<span style="color:var(--muted)">Consulte o INPE para ver a animação</span>';
+      return '<b style="color:'+getComputedStyle(el('ciCls')).color+'">'+el('ciVal').textContent+'</b> '+el('ciCls').textContent+'<br><span style="color:var(--muted)">'+el('ciWhen').textContent+'</span>';
+    }},
+    cl:{pn:'clPanel', play:'clRdPlay', sl:'clRdSl', lbl:()=>{
+      const eta=el('clEta').querySelector('.cl-eta');
+      return el('clRdT').innerHTML+(eta?'<br>'+eta.innerHTML:'');
+    }}
+  };
+  let timer=null;
+  function sync(){
+    let algum=false;
+    Object.keys(CFG).forEach(k=>{
+      const c=CFG[k], pn=el(c.pn); if(!pn.classList.contains('mini')||!pn.classList.contains('open')) return;
+      algum=true;
+      const mini=el(k+'Mini'), sl=mini.querySelector('.mini-sl'), ms=el(c.sl);
+      if(document.activeElement!==sl){ sl.max=ms.max; sl.value=ms.value; }
+      mini.querySelector('.mini-play').textContent=el(c.play).textContent;
+      const h=c.lbl(); const lb=mini.querySelector('.mini-lbl'); if(lb._h!==h){ lb.innerHTML=h; lb._h=h; }
+    });
+    if(!algum){ clearInterval(timer); timer=null; }
+  }
+  function setMini(k,on){
+    const pn=el(CFG[k].pn); pn.classList.toggle('mini',on);
+    if(on){ sync(); if(!timer) timer=setInterval(sync,250); }
+  }
+  Object.keys(CFG).forEach(k=>{
+    const c=CFG[k], mini=el(k+'Mini');
+    el(c.pn).querySelector('.ci-minb').addEventListener('click',()=>setMini(k,!el(c.pn).classList.contains('mini')));
+    mini.querySelector('.mini-play').addEventListener('click',()=>{ el(c.play).click(); sync(); });
+    mini.querySelector('.mini-sl').addEventListener('input',e=>{
+      const ms=el(c.sl); ms.value=e.target.value; ms.dispatchEvent(new Event('input')); sync();
+    });
+    // ao fechar o painel, volta ao modo completo na próxima abertura
+    new MutationObserver(()=>{ const k=el(c.pn).classList; if(!k.contains('open') && k.contains('mini')) k.remove('mini'); })
+      .observe(el(c.pn),{attributes:true,attributeFilter:['class']});
+  });
+})();
+
 
 
 </script>
