@@ -3431,6 +3431,45 @@ window.fecharPerfil=function(){ document.getElementById('perfilModal').classList
 })();
 
 /* =========================================================================
+   CropOverlay: imagem georreferenciada que só desenha o trecho VISÍVEL.
+   (L.imageOverlay de área grande em zoom alto vira um <img> de dezenas de
+   milhares de px e derruba o Safari do iPhone por falta de memória)
+   ========================================================================= */
+function CropOverlay(opts){
+  const o={src:null,b:null,op:opts.opacity??1,z:opts.zIndex||360,cls:opts.className||'',pix:!!opts.pixelated,ov:null,
+           cv:document.createElement('canvas'),raf:0};
+  function some(){ if(o.ov){ map.removeLayer(o.ov); o.ov=null; } }
+  function redraw(){
+    o.raf=0;
+    if(!o.src||!o.b||o.op<=0){ some(); return; }
+    const z=map.getZoom(), p1=map.project(o.b.getNorthWest(),z), p2=map.project(o.b.getSouthEast(),z);
+    const vb=map.getPixelBounds(), sz=vb.getSize(), pd=0.35;
+    const ix1=Math.max(p1.x,vb.min.x-sz.x*pd), iy1=Math.max(p1.y,vb.min.y-sz.y*pd);
+    const ix2=Math.min(p2.x,vb.max.x+sz.x*pd), iy2=Math.min(p2.y,vb.max.y+sz.y*pd);
+    if(ix2-ix1<1||iy2-iy1<1){ some(); return; }
+    const W=o.src.width, H=o.src.height, kx=W/(p2.x-p1.x), ky=H/(p2.y-p1.y);
+    const sx=(ix1-p1.x)*kx, sy=(iy1-p1.y)*ky, sw=Math.max(.01,(ix2-ix1)*kx), sh=Math.max(.01,(iy2-iy1)*ky);
+    let ow=ix2-ix1, oh=iy2-iy1; const f=Math.min(1,1600/Math.max(ow,oh));
+    ow=Math.max(1,Math.round(ow*f)); oh=Math.max(1,Math.round(oh*f));
+    o.cv.width=ow; o.cv.height=oh;
+    const cx=o.cv.getContext('2d'); cx.imageSmoothingEnabled=!o.pix; cx.clearRect(0,0,ow,oh);
+    cx.drawImage(o.src,sx,sy,sw,sh,0,0,ow,oh);
+    const bb=L.latLngBounds(map.unproject(L.point(ix1,iy1),z),map.unproject(L.point(ix2,iy2),z));
+    const url=o.cv.toDataURL('image/png');
+    if(!o.ov) o.ov=L.imageOverlay(url,bb,{opacity:o.op,zIndex:o.z,interactive:false,className:o.cls}).addTo(map);
+    else { o.ov.setUrl(url); o.ov.setBounds(bb); o.ov.setOpacity(o.op); }
+  }
+  const agenda=()=>{ if(!o.raf) o.raf=requestAnimationFrame(redraw); };
+  map.on('moveend',agenda);
+  return {
+    set(src,b){ o.src=src; o.b=L.latLngBounds(b); agenda(); },
+    update(b,op){ if(b) o.b=L.latLngBounds(b); if(op!=null) o.op=op; agenda(); },
+    setOpacity(v){ const was=o.op; o.op=v; if(o.ov&&v>0&&was>0) o.ov.setOpacity(v); else agenda(); },
+    remove(){ map.off('moveend',agenda); if(o.raf) cancelAnimationFrame(o.raf); some(); o.src=null; }
+  };
+}
+
+/* =========================================================================
    CINTILAÇÃO IONOSFÉRICA
    - Mapas S4 / σφ do INPE-EMBRACE (grade lat/lon, 1 arquivo por minuto,
      https://embracedata.inpe.br/scintillation/maps/)
@@ -3592,7 +3631,7 @@ function classe(v,param){
 /* ---------- overlay no mapa (reprojeta grade lat/lon -> Mercator) ---------- */
 function renderOverlay(){
   const g=CI.grids[CI.idx];
-  if(!g || !CI.ovOn){ if(CI.ov){ map.removeLayer(CI.ov); CI.ov=null; } return; }
+  if(!g || !CI.ovOn){ if(CI.ov){ CI.ov.remove(); CI.ov=null; } return; }
   const sLat=(EXT.latMax-EXT.latMin)/(g.nLat-1), sLon=(EXT.lonMax-EXT.lonMin)/(g.nLon-1);
   const N=EXT.latMax+sLat/2, S=EXT.latMin-sLat/2, W=EXT.lonMin-sLon/2, E=EXT.lonMax+sLon/2;
   const merc=lat=>Math.log(Math.tan(Math.PI/4+lat*Math.PI/360));
@@ -3612,9 +3651,9 @@ function renderOverlay(){
     }
   }
   cx.putImageData(img,0,0);
-  const url=cv.toDataURL(), bnds=[[S,W],[N,E]], op=+el('ciOpa').value/100;
-  if(!CI.ov) CI.ov=L.imageOverlay(url,bnds,{opacity:op,className:'ci-ov',interactive:false,zIndex:350}).addTo(map);
-  else { CI.ov.setUrl(url); CI.ov.setBounds(L.latLngBounds(bnds)); CI.ov.setOpacity(op); }
+  const bnds=[[S,W],[N,E]], op=+el('ciOpa').value/100;
+  if(!CI.ov) CI.ov=CropOverlay({opacity:op,className:'ci-ov',zIndex:350,pixelated:true});
+  CI.ov.update(null,op); CI.ov.set(cv,bnds);
 }
 
 /* ---------- série temporal no ponto ---------- */
@@ -3891,7 +3930,7 @@ function abre(){
 function fecha(){
   el('ciPanel').classList.remove('open'); el('ciBtn').classList.remove('on');
   pararPlay(); CI.picking=false; el('ciPick').classList.remove('on');
-  if(CI.ov){ map.removeLayer(CI.ov); CI.ov=null; }
+  if(CI.ov){ CI.ov.remove(); CI.ov=null; }
   if(CI.mk){ map.removeLayer(CI.mk); CI.mk=null; }
 }
 function pararPlay(){ if(CI.play){ clearInterval(CI.play); CI.play=null; el('ciPlay').textContent='▶'; } }
@@ -4165,6 +4204,7 @@ function windArrow(v,d){
 
 /* ---------------- Radar (RainViewer) ---------------- */
 const RV_COLOR=2; // Universal Blue (único esquema liberado no plano grátis)
+const RV_ZMAX=12;  // resolução do radar ~1 km: acima disso só pesa (e no iPhone derruba a página)
 async function carregaRadar(){
   el('clRdSt').textContent='Carregando radar…';
   try{
@@ -4177,7 +4217,8 @@ async function carregaRadar(){
   const sel=past.slice(-nq);
   sel.forEach(f=>{
     const lyr=L.tileLayer(CL.rv.host+f.path+'/512/{z}/{x}/{y}/'+RV_COLOR+'/1_0.png',
-      {tileSize:512, zoomOffset:-1, maxNativeZoom:8, maxZoom:20, opacity:0, zIndex:360, className:'cl-rv', attribution:'Radar RainViewer'});
+      {tileSize:512, zoomOffset:-1, maxNativeZoom:8, maxZoom:RV_ZMAX, opacity:0, zIndex:360, className:'cl-rv', attribution:'Radar RainViewer',
+       updateWhenZooming:false, keepBuffer:0});
     lyr.addTo(map);
     CL.frames.push({t:f.time*1000, kind:'past', lyr});
   });
@@ -4190,21 +4231,23 @@ function limpaRadar(){
   pararPlay();
   CL.frames.forEach(f=>{ if(f.lyr) map.removeLayer(f.lyr); });
   CL.frames=[];
-  if(CL.nowOv){ map.removeLayer(CL.nowOv); CL.nowOv=null; }
+  if(CL.nowOv){ CL.nowOv.remove(); CL.nowOv=null; }
 }
 function mostraQuadro(){
   const op=+el('clRdOpa').value/100;
   CL.frames.forEach((f,i)=>{
     const on=i===CL.fi;
-    if(f.kind==='past') f.lyr.setOpacity(on?op:0);
+    if(f.kind==='past'){ f.lyr.setOpacity(on?op:0); const c=f.lyr.getContainer&&f.lyr.getContainer(); if(c) c.style.display=on?'':'none'; }
   });
   const f=CL.frames[CL.fi];
   if(CL.nowOv){
-    if(f&&f.kind==='nc'){ CL.nowOv.setBounds(f.bounds); CL.nowOv.setOpacity(op*.85); }
-    else CL.nowOv.setOpacity(0);
+    if(f&&f.kind==='nc') CL.nowOv.update(f.bounds,op*.85);
+    else CL.nowOv.update(null,0);
   }
   el('clRdSl').max=Math.max(0,CL.frames.length-1); el('clRdSl').value=CL.fi;
-  if(f){
+  if(f && f.kind==='past' && map.getZoom()>RV_ZMAX){
+    el('clRdT').innerHTML=hhmm(new Date(f.t))+' <span style="color:#e0a44b">· afaste o zoom para ver o radar</span>';
+  } else if(f){
     const min=Math.round((f.t-Date.now())/60e3);
     el('clRdT').innerHTML=hhmm(new Date(f.t))+' '+(f.kind==='nc'?'<span style="color:#e0a44b">previsto (+'+Math.round((f.t-CL.frames.filter(x=>x.kind==='past').pop().t)/60e3)+' min)</span>':
       '<span style="color:var(--muted)">('+(min>=0?'agora':'há '+(-min)+' min')+')</span>');
@@ -4215,7 +4258,7 @@ function toggleCobertura(){
   if(CL.cov){ map.removeLayer(CL.cov); CL.cov=null; }
   if(!el('clRdCov').checked || !CL.rv) return;
   CL.cov=L.tileLayer(CL.rv.host+'/v2/coverage/0/512/{z}/{x}/{y}/0/0_0.png',
-    {tileSize:512,zoomOffset:-1,maxNativeZoom:8,maxZoom:20,opacity:.35,zIndex:355}).addTo(map);
+    {tileSize:512,zoomOffset:-1,maxNativeZoom:8,maxZoom:RV_ZMAX,opacity:.35,zIndex:355,updateWhenZooming:false,keepBuffer:0}).addTo(map);
 }
 
 // ---- leitura de pixels (precisa CORS; tenta direto e depois pelo Worker)
@@ -4319,10 +4362,10 @@ function calcMovimento(){
 function montaNowcast(){
   if(!CL.comp||!CL.mot) { mostraQuadro(); return; }
   const m=CL.comp, base=CL.compPath.time*1000, p=m.p;
-  const url=m.cv.toDataURL();
-  if(CL.nowOv) map.removeLayer(CL.nowOv);
+  if(CL.nowOv){ CL.nowOv.remove(); CL.nowOv=null; }
   const bnds=(sx,sy)=>L.latLngBounds(map.unproject(L.point(m.x0*512+sx,m.y0*512+sy),7), map.unproject(L.point((m.x0+2)*512+sx,(m.y0+2)*512+sy),7));
-  CL.nowOv=L.imageOverlay(url,bnds(0,0),{opacity:0,zIndex:361,interactive:false,className:'cl-rv'}).addTo(map);
+  CL.nowOv=CropOverlay({opacity:0,zIndex:361,className:'cl-rv'});
+  CL.nowOv.set(m.cv,bnds(0,0));
   const mpp=40075016.686*Math.cos(p.lat*Math.PI/180)/32768;
   CL.frames=CL.frames.filter(f=>f.kind==='past');
   for(let k=1;k<=6;k++){
@@ -4462,6 +4505,7 @@ el('clRdPlay').addEventListener('click',()=>{
   CL.play=setInterval(()=>{ CL.fi=(CL.fi+1)%CL.frames.length; mostraQuadro(); },600);
 });
 el('clRdOpa').addEventListener('input',mostraQuadro);
+map.on('zoomend',()=>{ if(CL.open && CL.frames.length) mostraQuadro(); });
 el('clRdCov').addEventListener('change',toggleCobertura);
 el('clRdCorr').addEventListener('change',desenhaCorredor);
 el('clRdWin').addEventListener('change',()=>{ prefs.clRdWin=el('clRdWin').value; savePrefs(); carregaRadar(); });
