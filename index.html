@@ -447,7 +447,11 @@ body.sidebar-collapsed #sidebar {
 #ciPanel.drag,#clPanel.drag{outline:2px dashed var(--accent);outline-offset:-6px}
 .ci-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}
 .ci-head h3{font-size:.9rem;font-weight:700;flex:1}
-.ci-head button{background:none;border:none;color:var(--muted);font-size:1rem;cursor:pointer}
+.ci-head button{background:var(--panel-2);border:1px solid var(--line);color:var(--text);font-size:1.05rem;cursor:pointer;
+  min-width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;padding:0;flex:none;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.ci-head button:active{background:var(--line)}
+.ci-head h3{cursor:pointer;user-select:none;-webkit-user-select:none;padding:10px 0}
 .ci-body{overflow:auto;padding:10px 12px 14px;display:flex;flex-direction:column;gap:10px}
 .ci-sec{display:flex;flex-direction:column;gap:6px}
 .ci-tit{font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
@@ -508,12 +512,14 @@ body.sidebar-collapsed #sidebar {
 .cl-lims{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
 /* ---- painéis minimizados (só animação) ---- */
 .ci-mini{display:none;flex-direction:column;gap:5px;padding:8px 12px 10px}
-.ci-minb{font-size:1.15rem!important;line-height:1;transition:transform .15s}
+.ci-minb{transition:transform .15s;color:var(--accent)!important;border-color:var(--accent)!important}
+.ci-minb svg{display:block}
 .mini .ci-minb{transform:rotate(180deg)}
 #ciPanel.mini,#clPanel.mini{top:auto!important;bottom:14px;max-height:none}
 .mini .ci-body{display:none!important}
 .mini .ci-mini{display:flex}
-.mini .ci-head{padding:6px 12px}
+.mini .ci-head{padding:6px 10px}
+.ci-head{gap:8px!important}
 .mini-lbl{font-size:.76rem;line-height:1.35;text-align:center}
 .mini-lbl b{font-family:'JetBrains Mono',monospace}
 .mini .mini-play{font-size:.95rem}
@@ -775,7 +781,7 @@ body.sidebar-collapsed #sidebar {
   </div>
 
   <div id="clPanel">
-    <div class="ci-head"><h3>🌦 Clima</h3><button id="clRefresh" title="Atualizar">↻</button><button class="ci-minb" data-p="cl" title="Minimizar / expandir">⌄</button><button id="clClose" title="Fechar">✕</button></div>
+    <div class="ci-head"><h3>🌦 Clima</h3><button id="clRefresh" title="Atualizar">↻</button><button class="ci-minb" data-p="cl" title="Minimizar / expandir"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button><button id="clClose" title="Fechar">✕</button></div>
     <div class="ci-mini" id="clMini">
       <div class="ci-row"><button class="ci-b mini-play" style="flex:0 0 44px">▶</button><input type="range" class="mini-sl" min="0" max="0" value="0" style="padding:0"></div>
       <div class="mini-lbl"></div>
@@ -851,7 +857,7 @@ body.sidebar-collapsed #sidebar {
   </div>
 
   <div id="ciPanel">
-    <div class="ci-head"><h3>📡 Cintilação ionosférica</h3><button class="ci-minb" data-p="ci" title="Minimizar / expandir">⌄</button><button id="ciClose" title="Fechar">✕</button></div>
+    <div class="ci-head"><h3>📡 Cintilação ionosférica</h3><button class="ci-minb" data-p="ci" title="Minimizar / expandir"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button><button id="ciClose" title="Fechar">✕</button></div>
     <div class="ci-mini" id="ciMini">
       <div class="ci-row"><button class="ci-b mini-play" style="flex:0 0 44px">▶</button><input type="range" class="mini-sl" min="0" max="0" value="0" style="padding:0"></div>
       <div class="mini-lbl"></div>
@@ -4513,6 +4519,7 @@ window._cl={CL,deltaT,correlaciona,calculaETA,avalia};
   Object.keys(CFG).forEach(k=>{
     const c=CFG[k], mini=el(k+'Mini');
     el(c.pn).querySelector('.ci-minb').addEventListener('click',()=>setMini(k,!el(c.pn).classList.contains('mini')));
+    el(c.pn).querySelector('.ci-head h3').addEventListener('click',()=>setMini(k,!el(c.pn).classList.contains('mini')));
     mini.querySelector('.mini-play').addEventListener('click',()=>{ el(c.play).click(); sync(); });
     mini.querySelector('.mini-sl').addEventListener('input',e=>{
       const ms=el(c.sl); ms.value=e.target.value; ms.dispatchEvent(new Event('input')); sync();
