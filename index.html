@@ -770,7 +770,7 @@ body.sidebar-collapsed #sidebar {
             <option value="s4">S4 (amplitude)</option><option value="phi">σφ (fase)</option>
           </select></label>
           <label class="ci-lb">Raio<select id="ciRad">
-            <option value="0">célula</option><option value="75">75 km</option><option value="150">150 km</option><option value="300">300 km</option>
+            <option value="0">célula</option><option value="75">75 km</option><option value="150" selected>150 km</option><option value="300">300 km</option>
           </select></label>
         </div>
         <div class="ci-row">
@@ -779,6 +779,7 @@ body.sidebar-collapsed #sidebar {
           <input type="file" id="ciFile" accept=".txt,.zip" multiple style="display:none">
         </div>
         <div id="ciStatus"></div>
+        <button class="ci-b" id="ciTrimble" title="Copia lat/lng/data no formato do Trimble e abre o site">↗ Abrir no Trimble GNSS Planning (copia lat/lng/data)</button>
       </div>
 
       <div class="ci-card" id="ciResult" style="display:none">
@@ -3321,7 +3322,7 @@ const PAR={
   phi:{nome:'σφ', unid:' rad', lim:[0.25,0.5], max:1.0, pasta:'sigma_phi', pref:'SIGMAPHI_MAP_'}
 };
 const CI={grids:[], idx:0, ov:null, ovOn:true, mk:null, picking:false, play:null, cache:new Map(),
-          orNS:null, orWE:null, kp:null, kpErr:null, busy:false};
+          orNS:null, orWE:null, kp:null, kpErr:null, busy:false, autoProxy:null};
 const el=id=>document.getElementById(id);
 const pad=(n,l=2)=>String(n).padStart(l,'0');
 const fmtHora=d=>d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
@@ -3383,8 +3384,9 @@ function urlINPE(param,d){
   const ymd=Y+pad(d.getUTCMonth()+1)+pad(d.getUTCDate()), hm=pad(d.getUTCHours())+pad(d.getUTCMinutes());
   return CI_BASE+P.pasta+'/'+Y+'/'+pad(doyUTC(d),3)+'/'+P.pref+ymd+'_'+hm+'.txt';
 }
+const PROXIES_PUB=['https://api.allorigins.win/raw?url={url}','https://corsproxy.io/?url={url}','https://api.codetabs.com/v1/proxy?quest={url}'];
 function viaProxy(u){
-  const px=(el('ciProxy').value||'').trim();
+  const px=(el('ciProxy').value||'').trim()||CI.autoProxy||'';
   if(!px) return u;
   return px.includes('{url}') ? px.replace('{url}',encodeURIComponent(u)) : px+u;
 }
@@ -3580,6 +3582,19 @@ async function baixaGrade(param,t){
   return null;
 }
 function status(msg,err){ const s=el('ciStatus'); s.innerHTML=msg; s.classList.toggle('err',!!err); }
+async function baixaLote(ts,param,label){
+  const out=[]; let feitos=0, falta=0, corsErr=null, outro=null; const q=ts.slice();
+  const worker=async()=>{
+    while(q.length && !corsErr){
+      const t=q.shift();
+      try{ const g=await baixaGrade(param,t); if(g) out.push(g); else falta++; }
+      catch(e){ if(e.cors) corsErr=e; else outro=e; }
+      feitos++; status('Baixando '+feitos+'/'+ts.length+' mapas do INPE'+label+'…');
+    }
+  };
+  await Promise.all([1,2,3,4].map(worker));
+  return {out,falta,corsErr,outro};
+}
 async function consultar(){
   if(CI.busy) return;
   const jan=janela(); if(!jan){ status('Informe a data.',true); return; }
@@ -3590,22 +3605,25 @@ async function consultar(){
   if(!ts.length){ status('Essa janela ainda não aconteceu — o INPE só tem dados medidos. Veja o risco previsto abaixo.',true); return; }
   if(ts.length>400){ status('Janela muito longa para esse passo ('+ts.length+' mapas). Aumente o passo.',true); return; }
   CI.busy=true; el('ciGo').disabled=true;
-  const out=[]; let feitos=0, falta=0, corsErr=null, outro=null, q=ts.slice();
-  status('Baixando 0/'+ts.length+' mapas do INPE…');
-  const worker=async()=>{
-    while(q.length && !corsErr){
-      const t=q.shift();
-      try{ const g=await baixaGrade(param,t); if(g) out.push(g); else falta++; }
-      catch(e){ if(e.cors) corsErr=e; else outro=e; }
-      feitos++; status('Baixando '+feitos+'/'+ts.length+' mapas do INPE…');
+  let r;
+  try{
+    r=await baixaLote(ts,param,'');
+    // INPE não libera CORS: se não há proxy próprio, tenta os proxies públicos (1º que responder fica)
+    if(r.corsErr && !r.out.length && !(el('ciProxy').value||'').trim()){
+      const lista=[CI.autoProxy,...PROXIES_PUB].filter((v,k,a)=>v && a.indexOf(v)===k);
+      for(const px of lista){
+        CI.autoProxy=px;
+        r=await baixaLote(ts,param,' via '+px.split('/')[2]);
+        if(r.out.length || !r.corsErr) break;
+        CI.autoProxy=null;
+      }
     }
-  };
-  await Promise.all([1,2,3,4,5].map(worker));
-  CI.busy=false; el('ciGo').disabled=false;
+  } finally { CI.busy=false; el('ciGo').disabled=false; }
+  const {out,falta,corsErr,outro}=r;
   if(corsErr && !out.length){
-    status('O navegador não conseguiu ler o servidor do INPE (bloqueio CORS ou sem internet).<br>'+
-      '→ Rode o <b>inpe_cintilacao.py</b> no PC (modo <i>proxy</i>) e coloque <span style="font-family:monospace">http://localhost:8765/?url={url}</span> em Avançado, '+
-      'ou baixe os .txt/.zip e use <b>Carregar</b>.<br><a href="'+urlINPE(param,ts[0]).replace(/[^/]+$/,'')+'" target="_blank" style="color:var(--accent)">Abrir pasta do dia no INPE ↗</a>',true);
+    status('O INPE bloqueia leitura direta pelo navegador (CORS) e os proxies públicos não responderam.<br>'+
+      '→ Melhor solução: publique o <b>proxy_inpe_worker.js</b> no Cloudflare Workers (grátis, 5 min) e cole a URL em <b>Avançado</b> — funciona no celular de qualquer lugar.<br>'+
+      '→ Ou baixe os .txt/.zip (inpe_cintilacao.py) e use <b>Carregar</b>.<br><a href="'+urlINPE(param,ts[0]).replace(/[^/]+$/,'')+'" target="_blank" style="color:var(--accent)">Abrir pasta do dia no INPE ↗</a>',true);
     return;
   }
   if(!out.length){
@@ -3613,7 +3631,8 @@ async function consultar(){
     return;
   }
   carregaGrades(out, jan.ref);
-  status('✓ '+out.length+' mapas carregados'+(falta?' · '+falta+' horário(s) sem arquivo':'')+'.');
+  status('✓ '+out.length+' mapas carregados'+(falta?' · '+falta+' horário(s) sem arquivo':'')+
+    (CI.autoProxy&&!(el('ciProxy').value||'').trim()?' · via proxy público '+CI.autoProxy.split('/')[2]:'')+'.');
 }
 function carregaGrades(lista, ref){
   lista.forEach(detectaOrientacao);
@@ -3794,6 +3813,21 @@ el('ciNow').addEventListener('click',()=>{
 el('ciProxy').addEventListener('change',()=>{ prefs.ciProxy=el('ciProxy').value.trim(); savePrefs(); });
 ['ciOrNS','ciOrWE'].forEach(k=>el(k).addEventListener('change',()=>{ renderOverlay(); atualizaTudo(); }));
 el('ciGo').addEventListener('click',consultar);
+function gmsTrimble(v,pos,neg){
+  const h=v<0?neg:pos; v=Math.abs(v);
+  let g=Math.floor(v), m=Math.floor((v-g)*60), s=((v-g)*60-m)*60;
+  if(s>=59.99995){ s=0; m++; } if(m>=60){ m=0; g++; }
+  return h+' '+g+'° '+m+"' "+s.toFixed(4)+'"';
+}
+el('ciTrimble').addEventListener('click',async()=>{
+  const p=getPt(), t=localSel();
+  const txt=p?('Latitude: '+gmsTrimble(p.lat,'N','S')+'\nLongitude: '+gmsTrimble(p.lng,'E','W')+
+    (t?'\nDia: '+t.toLocaleDateString('pt-BR')+'  Hora: '+fmtHora(t)+'  (UTC -3)':'')):'';
+  let ok=false;
+  if(txt){ try{ await navigator.clipboard.writeText(txt); ok=true; }catch(e){} }
+  window.open('https://www.gnssplanning.com/','_blank','noopener');
+  toast(ok?'Copiado: '+txt.replace(/\n/g,' · ')+' — cole em Settings e depois World View › Ionosphere.':'Abrindo o Trimble (não consegui copiar as coordenadas).',7000);
+});
 el('ciLoad').addEventListener('click',()=>el('ciFile').click());
 el('ciFile').addEventListener('change',e=>{ carregaArquivos([...e.target.files]); e.target.value=''; });
 const pn=el('ciPanel');
